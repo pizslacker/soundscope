@@ -1,4 +1,4 @@
-# soundscope
+# SoundScope
 
 A real-time oscilloscope, we need to strip away SDL_mixer and use SDL2's raw audio callback.
 

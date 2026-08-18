@@ -1,5 +1,5 @@
 soundscope: soundscope.c
-	gcc -Wall -Wextra -O3 -o soundscope soundscope.c -lSDL2
+	gcc -Wall -Wextra -O3 -o soundscope soundscope.c -lSDL2 -lm
 	strip soundscope
 
 clean:

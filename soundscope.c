@@ -5,8 +5,51 @@
 #include <stdbool.h>
 #include <string.h>
 
-#define SCREEN_W 800
-#define SCREEN_H 600
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+#define FFT_SIZE 512
+#define NUM_BARS 32
+
+// In-place Radix-2 Fast Fourier Transform (FFT)
+void compute_fft(float* Re, float* Im, int N) {
+    // 1. Bit-reversal sorting
+    int j = 0;
+    for (int i = 0; i < N; i++) {
+        if (i < j) {
+            float tr = Re[j], ti = Im[j];
+            Re[j] = Re[i]; Im[j] = Im[i];
+            Re[i] = tr; Im[i] = ti;
+        }
+        int k = N >> 1;
+        while (k >= 1 && j >= k) { j -= k; k >>= 1; }
+        j += k;
+    }
+
+    // 2. Cooley-Tukey Decimation-in-Time
+    for (int step = 1; step < N; step <<= 1) {
+        float theta = -M_PI / step;
+        float wtemp, wr = 1.0f, wi = 0.0f, wpr = cosf(theta), wpi = sinf(theta);
+        for (int m = 0; m < step; m++) {
+            for (int i = m; i < N; i += step << 1) {
+                j = i + step;
+                float tmpr = wr * Re[j] - wi * Im[j];
+                float tmpi = wr * Im[j] + wi * Re[j];
+                Re[j] = Re[i] - tmpr;
+                Im[j] = Im[i] - tmpi;
+                Re[i] += tmpr;
+                Im[i] += tmpi;
+            }
+            wtemp = wr;
+            wr = wr * wpr - wi * wpi;
+            wi = wi * wpr + wtemp * wpi;
+        }
+    }
+}
+
+#define SCREEN_W 1280
+#define SCREEN_H 720
 
 // Compact 8x8 ASCII Font (Characters 32 to 95: Space to '_')
 const uint8_t font8x8[64][8] = {
@@ -92,7 +135,7 @@ void audio_callback(void* userdata, Uint8* stream, int len) {
 
     int copied = 0;
     while (len > 0) {
-        int to_copy = (len > ctx->remaining) ? ctx->remaining : len;
+       int to_copy = (int)(((Uint32)len > ctx->remaining) ? ctx->remaining : (Uint32)len);
         SDL_memcpy(stream + copied, ctx->pos, to_copy);
         
         ctx->pos += to_copy;
@@ -130,6 +173,9 @@ void audio_callback(void* userdata, Uint8* stream, int len) {
         idx++;
     }
 }
+
+// Track the height of the EQ bars for smooth gravity falloff
+float eq_peaks[NUM_BARS] = {0};
 
 int main(int argc, char* argv[]) {
     const char* filename = "bitdream.wav"; // Default filename
@@ -190,6 +236,9 @@ int main(int argc, char* argv[]) {
     bool running = true;
     SDL_Event event;
 
+    // Tracks the sliding scale of the EQ for Auto-Gain Control
+    float global_peak = 0.1f; 
+
     while (running) {
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) running = false;
@@ -200,31 +249,108 @@ int main(int argc, char* argv[]) {
         SDL_SetRenderDrawColor(renderer, 5, 10, 5, 60); 
         SDL_RenderFillRect(renderer, NULL);
 
-        // --- 2. DRAW WAVEFORMS ---
-        float amplitude_scalar = (SCREEN_H / 2.0f) * 0.8f; 
-        int center_y_L = SCREEN_H / 3;
-        int center_y_R = (SCREEN_H / 3) * 2;
+        // --- 2. DRAW WAVEFORMS (Upper Left and Upper Right) ---
+        int half_w = SCREEN_W / 2;
+        float scope_amp = (SCREEN_H * 0.15f); 
+        int scope_y = SCREEN_H * 0.175f;      
 
         // Draw Left Channel
         SDL_SetRenderDrawColor(renderer, 50, 255, 100, 255);
-        for (int x = 0; x < SCREEN_W - 1; x++) {
-            int y1 = center_y_L - (int)((vis_buffer_L[x] / 32768.0f) * amplitude_scalar);
-            int y2 = center_y_L - (int)((vis_buffer_L[x+1] / 32768.0f) * amplitude_scalar);
+        for (int x = 0; x < half_w - 1; x++) {
+            int idx1 = x * 2;
+            int idx2 = idx1 + 2;
+            int y1 = scope_y - (int)((vis_buffer_L[idx1] / 32768.0f) * scope_amp);
+            int y2 = scope_y - (int)((vis_buffer_L[idx2] / 32768.0f) * scope_amp);
             SDL_RenderDrawLine(renderer, x, y1, x + 1, y2);
         }
 
         // Draw Right Channel
         SDL_SetRenderDrawColor(renderer, 50, 200, 255, 255);
-        for (int x = 0; x < SCREEN_W - 1; x++) {
-            int y1 = center_y_R - (int)((vis_buffer_R[x] / 32768.0f) * amplitude_scalar);
-            int y2 = center_y_R - (int)((vis_buffer_R[x+1] / 32768.0f) * amplitude_scalar);
-            SDL_RenderDrawLine(renderer, x, y1, x + 1, y2);
+        for (int x = 0; x < half_w - 1; x++) {
+            int idx1 = x * 2;
+            int idx2 = idx1 + 2;
+            int y1 = scope_y - (int)((vis_buffer_R[idx1] / 32768.0f) * scope_amp);
+            int y2 = scope_y - (int)((vis_buffer_R[idx2] / 32768.0f) * scope_amp);
+            SDL_RenderDrawLine(renderer, half_w + x, y1, half_w + x + 1, y2);
         }
 
-        // --- 3. CALCULATE AND DRAW TIMECODE ---
+        // Draw Dashboard Borders
+        SDL_SetRenderDrawColor(renderer, 20, 80, 40, 150); 
+        SDL_RenderDrawLine(renderer, half_w, 0, half_w, SCREEN_H * 0.35f);            
+        SDL_RenderDrawLine(renderer, 0, SCREEN_H * 0.35f, SCREEN_W, SCREEN_H * 0.35f); 
+
+        // --- 3. FFT FREQUENCY EQUALIZER (With Auto-Gain Control) ---
+        float re[FFT_SIZE] = {0};
+        float im[FFT_SIZE] = {0};
+        
+        int start_idx = SCREEN_W - FFT_SIZE;
+        for (int i = 0; i < FFT_SIZE; i++) {
+            float sample = (vis_buffer_L[start_idx + i] + vis_buffer_R[start_idx + i]) / 2.0f;
+            sample /= 32768.0f;
+            float window_func = 0.5f * (1.0f - cosf(2.0f * M_PI * i / (FFT_SIZE - 1)));
+            re[i] = sample * window_func;
+            im[i] = 0.0f;
+        }
+
+        compute_fft(re, im, FFT_SIZE);
+
+        int bar_width = SCREEN_W / NUM_BARS;
+        float eq_max_h = SCREEN_H * 0.65f - 50.0f; 
+        
+        // PASS 1: Analyze raw amplitudes
+        float raw_amps[NUM_BARS] = {0};
+        float current_frame_peak = 0.01f; 
+
+        for (int b = 0; b < NUM_BARS; b++) {
+            float freq_start = powf((float)b / NUM_BARS, 2.0f) * (FFT_SIZE / 2);
+            float freq_end   = powf((float)(b + 1) / NUM_BARS, 2.0f) * (FFT_SIZE / 2);
+            if ((int)freq_end <= (int)freq_start) freq_end = freq_start + 1.0f;
+
+            float sum = 0.0f;
+            for (int i = (int)freq_start; i < (int)freq_end && i < FFT_SIZE / 2; i++) {
+                sum += sqrtf(re[i] * re[i] + im[i] * im[i]);
+            }
+            
+            raw_amps[b] = sum / (freq_end - freq_start);
+            if (raw_amps[b] > current_frame_peak) current_frame_peak = raw_amps[b];
+        }
+
+        // Apply Auto-Gain Control
+        if (current_frame_peak > global_peak) {
+            global_peak = current_frame_peak; 
+        } else {
+            global_peak *= 0.995f; 
+        }
+        if (global_peak < 0.05f) global_peak = 0.05f; 
+
+        // PASS 2: Apply gravity and draw the bars
+        for (int b = 0; b < NUM_BARS; b++) {
+            float amplitude = (raw_amps[b] / global_peak) * (eq_max_h * 0.9f);
+
+            if (amplitude > eq_peaks[b]) {
+                eq_peaks[b] = amplitude; 
+            } else {
+                eq_peaks[b] -= 4.0f;     
+            }
+            if (eq_peaks[b] < 0) eq_peaks[b] = 0;
+
+            int bar_h = (int)eq_peaks[b];
+            if (bar_h > eq_max_h) bar_h = eq_max_h; 
+
+            SDL_Rect bar_rect = {
+                b * bar_width + 4,              
+                SCREEN_H - 45 - bar_h,  
+                bar_width - 8,                  
+                bar_h                           
+            };
+            
+            SDL_SetRenderDrawColor(renderer, 50, 255, 100, 200);
+            SDL_RenderFillRect(renderer, &bar_rect);
+        }
+
+        // --- 4. CALCULATE AND DRAW TIMECODE (Bottom Left) ---
         Uint8* current_pos = audio_ctx.pos;
         Uint32 bytes_played = (Uint32)(current_pos - audio_ctx.start);
-        
         long total_ms = (long)(((double)bytes_played / bytes_per_second) * 1000.0);
         
         int minutes = (total_ms / 60000);
@@ -238,25 +364,21 @@ int main(int argc, char* argv[]) {
         int text_x = 20;
         int text_y = SCREEN_H - 36;
         
-        // Draw an OPAQUE black background behind the text to prevent ghosting
         SDL_Rect bg_rect = { text_x - 5, text_y - 5, (strlen(time_str) * 8 * text_scale) + 10, (8 * text_scale) + 10 };
         SDL_SetRenderDrawColor(renderer, 5, 10, 5, 255); 
         SDL_RenderFillRect(renderer, &bg_rect);
 
-        // Draw the Monospace music timecode text (lower left)
         SDL_SetRenderDrawColor(renderer, 50, 255, 100, 255); 
         draw_osd_text(renderer, text_x, text_y, time_str, text_scale);
 
-        // --- 4. CALCULATE AND DRAW FILENAME (Bottom Right) ---
+        // --- 5. CALCULATE AND DRAW FILENAME (Bottom Right) ---
         int fn_len = strlen(filename);
-        int fn_text_x = SCREEN_W - (fn_len * 8 * text_scale) - 20; // 20px padding from right edge
+        int fn_text_x = SCREEN_W - (fn_len * 8 * text_scale) - 20; 
         
-        // Draw an OPAQUE black background behind the filename
         SDL_Rect fn_bg_rect = { fn_text_x - 5, text_y - 5, (fn_len * 8 * text_scale) + 10, (8 * text_scale) + 10 };
         SDL_SetRenderDrawColor(renderer, 5, 10, 5, 255); 
         SDL_RenderFillRect(renderer, &fn_bg_rect);
 
-        // Draw the Monospace filename text (lower right)
         SDL_SetRenderDrawColor(renderer, 50, 255, 100, 255); 
         draw_osd_text(renderer, fn_text_x, text_y, filename, text_scale);
 

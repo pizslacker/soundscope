@@ -10,6 +10,10 @@ For this demo, we will use a .wav file (since SDL2 has a built-in WAV loader). W
 
 By shifting the data left (`memmove`) and appending the new, tiny 512-sample chunks to the right, the visualizer is no longer a static flashing line. It becomes a continuously flowing stream of audio data that perfectly tracks every single high-hat and bass kick with virtually zero latency.
 
+To convert raw audio waveforms into a frequency equalizer (EQ), we have to cross over into the realm of Digital Signal Processing (DSP) by implementing a Fast Fourier Transform (FFT).
+
+An FFT takes a slice of time (the raw waveform) and mathematically unweaves it into its individual frequency components (Bass, Mid, Treble).
+
 ```bash
 SoundScope - Real-Time Audio Visualizer
 

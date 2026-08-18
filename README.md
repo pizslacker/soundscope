@@ -8,4 +8,24 @@ For this demo, we will use a .wav file (since SDL2 has a built-in WAV loader). W
 
 By shifting the data left (`memmove`) and appending the new, tiny 512-sample chunks to the right, the visualizer is no longer a static flashing line. It becomes a continuously flowing stream of audio data that perfectly tracks every single high-hat and bass kick with virtually zero latency.
 
+```bash
+SoundScope - Real-Time Audio Visualizer
+
+USAGE:
+  ./soundscope [options] [audio_file.wav]
+
+ARGUMENTS:
+  audio_file.wav     Path to a 16-bit PCM WAV file. If omitted,
+                     the program defaults to 'bitdream.wav'.
+
+OPTIONS:
+  -h, --help         Display this help menu and exit.
+
+CONTROLS:
+  [ESC]              Quit the visualizer.
+
+EXAMPLE:
+  ./soundscope my_music.wav
+```
+
 ![SoundScope SDL2 window](images/soundscope.png)

@@ -7,3 +7,5 @@ Instead of just telling SDL to play a file and forgetting about it, the callback
 For this demo, we will use a .wav file (since SDL2 has a built-in WAV loader). We'll also use an alpha-blended background clear to simulate the glowing phosphor fade of a classic CRT monitor.
 
 By shifting the data left (`memmove`) and appending the new, tiny 512-sample chunks to the right, the visualizer is no longer a static flashing line. It becomes a continuously flowing stream of audio data that perfectly tracks every single high-hat and bass kick with virtually zero latency.
+
+![SoundScope SDL2 window](images/soundscope.png)

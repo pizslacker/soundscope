@@ -1,6 +1,6 @@
 # SoundScope
 
-A real-time oscilloscope, for playback of 16bit PCM WAV files. Thanks to [**k!M**](https://soundcloud.com/kim-olsen-357297567) for audio!
+A real-time oscilloscope, for playback of 16bit PCM WAV files. Thanks to [**k!M**](https://soundcloud.com/kim-olsen-357297567) for slowed-down audio!
 
 ![SoundScope SDL2 window](images/soundscope.png)
 

@@ -225,7 +225,7 @@ int main(int argc, char* argv[]) {
 
     Uint32 bytes_per_second = wav_spec.freq * wav_spec.channels * 2;
 
-    SDL_Window* window = SDL_CreateWindow("Cyberpunk Oscilloscope", 
+    SDL_Window* window = SDL_CreateWindow("SoundScope", 
                                           SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 
                                           SCREEN_W, SCREEN_H, SDL_WINDOW_SHOWN);
     SDL_Renderer* renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
